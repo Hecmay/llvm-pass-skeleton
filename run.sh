@@ -1,3 +1,6 @@
+# setup env variable 
+export PATH="/work/zhang-x1/common/install/llvm-8.0/build/bin/":$PATH
+export LLVM_DIR=/work/zhang-x1/common/install/llvm-8.0/build/lib/cmake/llvm/
 # compile pass to generate shared lib
 rm -rf build; mkdir build; cd build/; cmake ../; make; cd -
 # compile to llvm bitcode with clang fromtemd
