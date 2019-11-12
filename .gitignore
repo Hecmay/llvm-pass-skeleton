@@ -1,1 +1,5 @@
 build
+*.ll
+*.bc
+*.o
+a.out
