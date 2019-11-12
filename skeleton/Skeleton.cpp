@@ -32,7 +32,6 @@ namespace {
     }
 
     virtual bool runOnFunction(Function &F) {
-
       // craete llvm function with
       LLVMContext &Ctx = F.getContext();
       std::vector<Type*> paramTypes = {Type::getInt32Ty(Ctx)};
@@ -57,53 +56,40 @@ namespace {
       FPM.doFinalization();
 
       // induction var reduction
-      for(auto* L : LI){
-        PHINode *Node = L->getCanonicalInductionVariable();
-        if (Node != nullptr) {
-          errs() << Node->getName() <<"phi: \n";
-          // auto workList = L->getBlocksSet();
-          // SmallVector<Instruction *, 16> WorkListVec;
-          // for (Instruction &I : instructions(*loop)) {
-          //   WorkListVec.push_back(&I);
-          // }
-        }        
-
-        bool mutate = false;
-        for (auto &B : F) {
-          BasicBlock* b = &B;
-          // analyze basic blocks with loops
-          if (auto bi = dyn_cast<BranchInst>(B.getTerminator())) {
-            // Value *loopCond = bi->getCondition();
-            for (auto &I : B) {
-              if(isa<CallInst>(&I) || isa<InvokeInst>(&I)){
-                errs() << cast<CallInst>(&I)->getCalledFunction()->getName() << "\n";
-              } else if (isa<PHINode>(&I)) {
-                errs() << "phi:" << I; 
-              }
-              if (auto *op = dyn_cast<BinaryOperator>(&I)) {
-
-                IRBuilder<> builder(op); // ir builder at op
-                Value *lhs = op->getOperand(0);
-                Value *rhs = op->getOperand(1);
-                Value *mul = builder.CreateMul(lhs, rhs);
-  
-                mutate = true;
-                for (auto &U : op->uses()) {
-                  User *user = U.getUser();  
-                  // user->setOperand(U.getOperandNo(), mul);
+      for(auto* L : LI) {
+        // initalize worklist to find indvar
+        SmallPtrSet<Value*, 16> IndVarList;
+        for (auto &B : F) 
+          for (auto &I : B) 
+            if (PHINode *PN = dyn_cast<PHINode>(&I)) 
+              IndVarList.insert(&I);
+        // find all indvar
+        while (true) {
+          SmallPtrSet<Value*, 16> NewList = IndVarList;
+          for (auto &B : F) {
+            BasicBlock* b = &B;
+            if (LI.getLoopFor(b) == L) {
+              for (auto &I : B) {
+                if (auto *op = dyn_cast<BinaryOperator>(&I)) {
+                  Value *lhs = op->getOperand(0);
+                  Value *rhs = op->getOperand(1);
+                  if (IndVarList.count(lhs) || IndVarList.count(rhs)) 
+                    NewList.insert(&I); 
                 }
               }
-            }
-          }
+            } // finish block traversal
+          } // finish loop traversal
+          if (NewList.size() == IndVarList.size()) break;
+          else IndVarList = NewList;
         }
-      }
+      } // finish walking basic blocks in loop
       return true;
-    }
+    } // finish processing loops
   };
 }
 
 char SkeletonPass::ID = 0;
-static RegisterPass<SkeletonPass> X("mypass", "Stregth Reduction Pass",
+static RegisterPass<SkeletonPass> X("sr", "Stregth Reduction Pass",
                                     false /* Only looks at CFG */,
                                     true /* Not Analysis Pass */);
 

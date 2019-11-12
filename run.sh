@@ -5,5 +5,5 @@ clang -c -emit-llvm -O0 -Xclang -disable-O0-optnone example.c -o original.bc
 # generate llvm ir from bitcode
 llvm-dis original.bc 
 # optimze with llvm opt
-opt -S -load build/skeleton/libSkeletonPass.so -mem2reg -mypass original.ll -o opt.ll
+opt -S -load build/skeleton/libSkeletonPass.so -mem2reg -sr original.ll -o opt.ll
 ./a.out
