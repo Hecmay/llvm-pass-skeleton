@@ -1,16 +1,14 @@
 #include "llvm/Pass.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Utils.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/IR/Dominators.h"
 #include "llvm/Analysis/LoopInfo.h" 
 #include "llvm/IR/Dominators.h"
 #include "llvm/Transforms/Scalar.h"
@@ -19,7 +17,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/ScalarEvolution.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
 #include <assert.h>
 using namespace llvm;
 
@@ -45,21 +42,25 @@ namespace {
       Constant *logFunc = module->getOrInsertFunction("logop", logFuncType);
 
       // perform constant prop and loop analysis
-      auto constProp = createConstantPropagationPass();
-      bool changed = constProp->runOnFunction(F);
+      // should not call other passes with runOnFunction
+      // which may overwrite the original pass manager
       LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
 
       // induction var canonicalization  
-      PassManagerBuilder builder;
-      builder.OptLevel = 0;
       legacy::FunctionPassManager FPM(module);
+      FPM.add(createConstantPropagationPass());
+      FPM.add(createLoopSimplifyPass());
       FPM.add(createIndVarSimplifyPass());
-      FPM.run(F);
+      FPM.add(createDeadCodeEliminationPass());
+      FPM.doInitialization();
+      bool changed = FPM.run(F);
+      FPM.doFinalization();
 
       // induction var reduction
       for(auto* L : LI){
-        if (PHINode *Node = L->getCanonicalInductionVariable()) {
-          errs() << Node->getName() <<"\n";
+        PHINode *Node = L->getCanonicalInductionVariable();
+        if (Node != nullptr) {
+          errs() << Node->getName() <<"phi: \n";
           // auto workList = L->getBlocksSet();
           // SmallVector<Instruction *, 16> WorkListVec;
           // for (Instruction &I : instructions(*loop)) {
@@ -70,13 +71,14 @@ namespace {
         bool mutate = false;
         for (auto &B : F) {
           BasicBlock* b = &B;
-          // errs() << "analyze bb: " << B.getName() << "\n";
           // analyze basic blocks with loops
           if (auto bi = dyn_cast<BranchInst>(B.getTerminator())) {
             // Value *loopCond = bi->getCondition();
             for (auto &I : B) {
               if(isa<CallInst>(&I) || isa<InvokeInst>(&I)){
                 errs() << cast<CallInst>(&I)->getCalledFunction()->getName() << "\n";
+              } else if (isa<PHINode>(&I)) {
+                errs() << "phi:" << I; 
               }
               if (auto *op = dyn_cast<BinaryOperator>(&I)) {
 
@@ -95,16 +97,15 @@ namespace {
           }
         }
       }
-      // dump the mutated llvm ir & execute 
-      std::error_code ecode;
-      raw_fd_ostream dest("opt.ll", ecode);
-      module->print(dest, nullptr);
       return true;
     }
   };
 }
 
 char SkeletonPass::ID = 0;
+static RegisterPass<SkeletonPass> X("mypass", "Stregth Reduction Pass",
+                                    false /* Only looks at CFG */,
+                                    true /* Not Analysis Pass */);
 
 // Automatically enable the pass.
 // http://adriansampson.net/blog/clangpass.html
@@ -113,5 +114,5 @@ static void registerSkeletonPass(const PassManagerBuilder &,
   PM.add(new SkeletonPass());
 }
 static RegisterStandardPasses
-  RegisterMyPass(PassManagerBuilder::EP_EarlyAsPossible,
+  RegisterMyPass(PassManagerBuilder::EP_LoopOptimizerEnd,
                  registerSkeletonPass);
