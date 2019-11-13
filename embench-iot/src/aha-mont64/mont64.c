@@ -18,8 +18,7 @@
 
 /* This scale factor will be changed to equalise the runtime of the
    benchmarks. */
-//#define LOCAL_SCALE_FACTOR 316
-#define LOCAL_SCALE_FACTOR 3
+#define LOCAL_SCALE_FACTOR 316
 
 /* Computes a*b mod m using Montgomery multiplication (MM). a, b, and m
 are unsigned numbers with a, b < m < 2**64, and m odd. The code does
@@ -84,7 +83,6 @@ modul64 (uint64 x, uint64 y, uint64 z)
 
   for (i = 1; i <= 64; i++)
     {				// Do 64 times.
-      printf("modul64\n");
       t = (int64) x >> 63;	// All 1's if x(63) = 1.
       x = (x << 1) | (y >> 63);	// Shift x || y left
       y = y << 1;		// one bit.
@@ -228,7 +226,6 @@ benchmark_body (int rpt)
 
   for (i = 0; i < rpt; i++)
     {
-      printf("body\n");
       uint64 a, b, m, hr, p1hi, p1lo, p1, p, abar, bbar;
       uint64 phi, plo;
       volatile uint64 rinv, mprime;

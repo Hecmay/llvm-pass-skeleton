@@ -149,7 +149,7 @@ namespace {
         for (auto &B : F) {
           if (&B == b_header) {
             for (auto &I : B) {
-              // we assume we only have a single phi node
+              // we insert at the first phi node
               if (PHINode *PN = dyn_cast<PHINode>(&I)) {
                 int num_income = PN->getNumIncomingValues();
                 // find the preheader value of the phi node
@@ -164,7 +164,7 @@ namespace {
                 // create a new phi-node for replacement
                 for (auto &indvar : IndVarMap) {
                   tuple<Value*, int, int> t = indvar.second;
-                  if (get<1>(t) != 1 || get<2>(t) != 0) { // not a basic indvar
+                  if (get<0>(t) == PN && (get<1>(t) != 1 || get<2>(t) != 0)) { // not a basic indvar
                     // calculate the new indvar according to the preheader value
                     Value* new_incoming = head_builder.CreateMul(preheader_val, ConstantInt::getSigned(preheader_val->getType(), get<1>(t)));
                     new_incoming = head_builder.CreateAdd(new_incoming, ConstantInt::getSigned(preheader_val->getType(), get<2>(t)));
@@ -183,7 +183,7 @@ namespace {
           if (&B == b_body) {
             for (auto &indvar : IndVarMap) {
               tuple<Value*, int, int> t = indvar.second;
-              if (get<1>(t) != 1 || get<2>(t) != 0) { // not a basic indvar
+              if (PhiMap.count(indvar.first) && (get<1>(t) != 1 || get<2>(t) != 0)) { // not a basic indvar
                 for (auto &I : B) {
                   if (auto op = dyn_cast<BinaryOperator>(&I)) {
                     Value *lhs = op->getOperand(0);
@@ -213,6 +213,7 @@ namespace {
         }
 
       } // finish all loops
+
 
       // do another round of optimization
       FPM.doInitialization();

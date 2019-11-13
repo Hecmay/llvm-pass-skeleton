@@ -23,21 +23,16 @@ main (int argc __attribute__ ((unused)),
   int correct;
 
   //initialise_board ();
-  printf("a\n");
   initialise_benchmark ();
-  printf("b\n");
   warm_caches (0);
-  printf("c\n");
 
   //start_trigger ();
   result = benchmark ();
-  printf("d\n");
   //stop_trigger ();
 
   /* bmarks that use arrays will check a global array rather than int result */
 
   correct = verify_benchmark (result);
-  printf("e\n");
 
   printf("%d\n", correct);
 
