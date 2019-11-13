@@ -16,6 +16,7 @@ using namespace llvm;
 
 #include <tuple>
 #include <map>
+#include <iostream>
 using namespace std;
 
 namespace {
@@ -53,81 +54,94 @@ namespace {
       bool changed = FPM.run(F);
       FPM.doFinalization();
 
+
       // find all loop induction variables within a loop
       for(auto* L : LI) {
         // IndVarMap = {indvar: indvar tuple}
         // indvar tuple = (basic_indvar, scale, const)
         // indvar = basic_indvar * scale + const
         map<Value*, tuple<Value*, int, int> > IndVarMap;
-        // collect all basic indvars by visiting all phi nodes
-        for (auto &B : F) {
-          for (auto &I : B) {
-            if (PHINode *PN = dyn_cast<PHINode>(&I)) {
-              IndVarMap[&I] = make_tuple(&I, 1, 0);
-            }
+
+        // all induction variables should have phi nodes in the header
+        // notice that this might add additional variables, they are treated as basic induction
+        // variables for now
+        // the preheader block
+        BasicBlock* b_preheader = L->getLoopPreheader();
+        // the header block
+        BasicBlock* b_header = L->getHeader();
+        // the body block
+        BasicBlock* b_body;
+
+        for (auto &I : *b_header) {
+          if (PHINode *PN = dyn_cast<PHINode>(&I)) {
+            IndVarMap[&I] = make_tuple(&I, 1, 0);
           }
         }
+        
+        // get the total number of blocks as well as the block list
+        //cout << L->getNumBlocks() << "\n";
+        auto blks = L->getBlocks();
+
         // find all indvars
         // keep modifying the set until the size does not change
+        // notice that over here, our set of induction variables is not precise
         while (true) {
           map<Value*, tuple<Value*, int, int> > NewMap = IndVarMap;
-          for (auto &B : F) {
-            // if the basic block is inside the target loop L
+          // iterate through all blocks in the loop
+          for (auto B: blks) {
             // iterate through all its instructions
-            if (LI.getLoopFor(&B) == L) {
-              for (auto &I : B) {
-                // we only accept multiplication, addition, and subtraction
-                // we only accept constant integer as one of theoperands
-                if (auto *op = dyn_cast<BinaryOperator>(&I)) {
-                  Value *lhs = op->getOperand(0);
-                  Value *rhs = op->getOperand(1);
-                  // check if one of the operands belongs to indvars
-                  if (IndVarMap.count(lhs) || IndVarMap.count(rhs)) {
-                    // case: Add
-                    if (I.getOpcode() == Instruction::Add) {
-                      ConstantInt* CIL = dyn_cast<ConstantInt>(lhs);
-                      ConstantInt* CIR = dyn_cast<ConstantInt>(rhs);
-                      if (IndVarMap.count(lhs) && CIR) {
-                        tuple<Value*, int, int> t = IndVarMap[lhs];
-                        int new_val = CIR->getSExtValue() + get<2>(t);
-                        NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
-                      } else if (IndVarMap.count(rhs) && CIL) {
-                        tuple<Value*, int, int> t = IndVarMap[rhs];
-                        int new_val = CIL->getSExtValue() + get<2>(t);
-                        NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
-                      }
-                    // case: Sub
-                    } else if (I.getOpcode() == Instruction::Sub) {
-                      ConstantInt* CIL = dyn_cast<ConstantInt>(lhs);
-                      ConstantInt* CIR = dyn_cast<ConstantInt>(rhs);
-                      if (IndVarMap.count(lhs) && CIR) {
-                        tuple<Value*, int, int> t = IndVarMap[lhs];
-                        int new_val = get<2>(t) - CIR->getSExtValue();
-                        NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
-                      } else if (IndVarMap.count(rhs) && CIL) {
-                        tuple<Value*, int, int> t = IndVarMap[rhs];
-                        int new_val = get<2>(t) - CIL->getSExtValue();
-                        NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
-                      }
-                    // case: Mul
-                    } else if (I.getOpcode() == Instruction::Mul) {
-                      ConstantInt* CIL = dyn_cast<ConstantInt>(lhs);
-                      ConstantInt* CIR = dyn_cast<ConstantInt>(rhs);
-                      if (IndVarMap.count(lhs) && CIR) {
-                        tuple<Value*, int, int> t = IndVarMap[lhs];
-                        int new_val = CIR->getSExtValue() * get<1>(t);
-                        NewMap[&I] = make_tuple(get<0>(t), new_val, get<2>(t));
-                      } else if (IndVarMap.count(rhs) && CIL) {
-                        tuple<Value*, int, int> t = IndVarMap[rhs];
-                        int new_val = CIL->getSExtValue() * get<1>(t);
-                        NewMap[&I] = make_tuple(get<0>(t), new_val, get<2>(t));
-                      }
+            for (auto &I : *B) {
+              // we only accept multiplication, addition, and subtraction
+              // we only accept constant integer as one of theoperands
+              if (auto *op = dyn_cast<BinaryOperator>(&I)) {
+                Value *lhs = op->getOperand(0);
+                Value *rhs = op->getOperand(1);
+                // check if one of the operands belongs to indvars
+                if (IndVarMap.count(lhs) || IndVarMap.count(rhs)) {
+                  // case: Add
+                  if (I.getOpcode() == Instruction::Add) {
+                    ConstantInt* CIL = dyn_cast<ConstantInt>(lhs);
+                    ConstantInt* CIR = dyn_cast<ConstantInt>(rhs);
+                    if (IndVarMap.count(lhs) && CIR) {
+                      tuple<Value*, int, int> t = IndVarMap[lhs];
+                      int new_val = CIR->getSExtValue() + get<2>(t);
+                      NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
+                    } else if (IndVarMap.count(rhs) && CIL) {
+                      tuple<Value*, int, int> t = IndVarMap[rhs];
+                      int new_val = CIL->getSExtValue() + get<2>(t);
+                      NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
                     }
-                  } // if operand in indvar
-                } // if op is binop
-              } // if B inside L
+                  // case: Sub
+                  } else if (I.getOpcode() == Instruction::Sub) {
+                    ConstantInt* CIL = dyn_cast<ConstantInt>(lhs);
+                    ConstantInt* CIR = dyn_cast<ConstantInt>(rhs);
+                    if (IndVarMap.count(lhs) && CIR) {
+                      tuple<Value*, int, int> t = IndVarMap[lhs];
+                      int new_val = get<2>(t) - CIR->getSExtValue();
+                      NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
+                    } else if (IndVarMap.count(rhs) && CIL) {
+                      tuple<Value*, int, int> t = IndVarMap[rhs];
+                      int new_val = get<2>(t) - CIL->getSExtValue();
+                      NewMap[&I] = make_tuple(get<0>(t), get<1>(t), new_val);
+                    }
+                  // case: Mul
+                  } else if (I.getOpcode() == Instruction::Mul) {
+                    ConstantInt* CIL = dyn_cast<ConstantInt>(lhs);
+                    ConstantInt* CIR = dyn_cast<ConstantInt>(rhs);
+                    if (IndVarMap.count(lhs) && CIR) {
+                      tuple<Value*, int, int> t = IndVarMap[lhs];
+                      int new_val = CIR->getSExtValue() * get<1>(t);
+                      NewMap[&I] = make_tuple(get<0>(t), new_val, get<2>(t));
+                    } else if (IndVarMap.count(rhs) && CIL) {
+                      tuple<Value*, int, int> t = IndVarMap[rhs];
+                      int new_val = CIL->getSExtValue() * get<1>(t);
+                      NewMap[&I] = make_tuple(get<0>(t), new_val, get<2>(t));
+                    }
+                  }
+                } // if operand in indvar
+              } // if op is binop
             } // auto &I: B
-          } // auto &B: F
+          } // auto &B: blks
           if (NewMap.size() == IndVarMap.size()) break;
           else IndVarMap = NewMap;
         }
@@ -137,66 +151,57 @@ namespace {
         // note that after loop simplification
         // we will only have a unique header and preheader
         //
-        // the preheader block
-        BasicBlock* b_preheader = L->getLoopPreheader();
-        // the header block
-        BasicBlock* b_header = L->getHeader();
-        // the body block
-        BasicBlock* b_body;
 
         // modify the preheader block by inserting new phi nodes
         Value* preheader_val;
-        for (auto &B : F) {
-          if (&B == b_header) {
-            for (auto &I : B) {
-              // we insert at the first phi node
-              if (PHINode *PN = dyn_cast<PHINode>(&I)) {
-                int num_income = PN->getNumIncomingValues();
-                // find the preheader value of the phi node
-                for (int i = 0; i < num_income; i++) {
-                  if (PN->getIncomingBlock(i) == b_preheader) {
-                    preheader_val = PN->getIncomingValue(i);
-                  } else {
-                    b_body = PN->getIncomingBlock(i);
-                  }
-                }
-                IRBuilder<> head_builder(&I);
-                // create a new phi-node for replacement
-                for (auto &indvar : IndVarMap) {
-                  tuple<Value*, int, int> t = indvar.second;
-                  if (get<0>(t) == PN && (get<1>(t) != 1 || get<2>(t) != 0)) { // not a basic indvar
-                    // calculate the new indvar according to the preheader value
-                    Value* new_incoming = head_builder.CreateMul(preheader_val, ConstantInt::getSigned(preheader_val->getType(), get<1>(t)));
-                    new_incoming = head_builder.CreateAdd(new_incoming, ConstantInt::getSigned(preheader_val->getType(), get<2>(t)));
-                    PHINode* new_phi = head_builder.CreatePHI(preheader_val->getType(), 2);
-                    new_phi->addIncoming(new_incoming, b_preheader);
-                    PhiMap[indvar.first] = new_phi;
-                  }
-                }
+        Instruction* insert_pos = b_preheader->getTerminator();
+        for (auto &I : *b_header) {
+          // we insert at the first phi node
+          if (PHINode *PN = dyn_cast<PHINode>(&I)) {
+            int num_income = PN->getNumIncomingValues();
+            assert(num_income == 2);
+            // find the preheader value of the phi node
+            for (int i = 0; i < num_income; i++) {
+              if (PN->getIncomingBlock(i) == b_preheader) {
+                preheader_val = PN->getIncomingValue(i);
+                } else {
+                b_body = PN->getIncomingBlock(i);
+              }
+            }
+            IRBuilder<> head_builder(&I);
+            IRBuilder<> preheader_builder(insert_pos);
+            for (auto &indvar: IndVarMap) {
+              tuple<Value*, int, int> t = indvar.second;
+              if (get<0>(t) == PN && (get<1>(t) != 1 || get<2>(t) != 0)) { // not a basic indvar
+                // calculate the new indvar according to the preheader value
+                Value* new_incoming = preheader_builder.CreateMul(preheader_val, 
+                  ConstantInt::getSigned(preheader_val->getType(), get<1>(t)));
+                new_incoming = preheader_builder.CreateAdd(new_incoming, 
+                  ConstantInt::getSigned(preheader_val->getType(), get<2>(t)));
+                PHINode* new_phi = head_builder.CreatePHI(preheader_val->getType(), 2);
+                new_phi->addIncoming(new_incoming, b_preheader);
+                PhiMap[indvar.first] = new_phi;
               }
             }
           }
         }
 
         // modify the new body block by inserting cheaper computation
-        for (auto &B : F) {
-          if (&B == b_body) {
-            for (auto &indvar : IndVarMap) {
-              tuple<Value*, int, int> t = indvar.second;
-              if (PhiMap.count(indvar.first) && (get<1>(t) != 1 || get<2>(t) != 0)) { // not a basic indvar
-                for (auto &I : B) {
-                  if (auto op = dyn_cast<BinaryOperator>(&I)) {
-                    Value *lhs = op->getOperand(0);
-                    Value *rhs = op->getOperand(1);
-                    if (lhs == get<0>(t) || rhs == get<0>(t)) {
-                      IRBuilder<> body_builder(&I);
-                      tuple<Value*, int, int> t_basic = IndVarMap[&I];
-                      int new_val = get<1>(t) * get<2>(t_basic);
-                      PHINode* phi_val = PhiMap[indvar.first];
-                      Value* new_incoming = body_builder.CreateAdd(phi_val, ConstantInt::getSigned(phi_val->getType(), new_val));
-                      phi_val->addIncoming(new_incoming, b_body);
-                    }
-                  }
+        for (auto &indvar : IndVarMap) {
+          tuple<Value*, int, int> t = indvar.second;
+          if (PhiMap.count(indvar.first) && (get<1>(t) != 1 || get<2>(t) != 0)) { // not a basic indvar
+            for (auto &I : *b_body) {
+              if (auto op = dyn_cast<BinaryOperator>(&I)) {
+                Value *lhs = op->getOperand(0);
+                Value *rhs = op->getOperand(1);
+                if (lhs == get<0>(t) || rhs == get<0>(t)) {
+                  IRBuilder<> body_builder(&I);
+                  tuple<Value*, int, int> t_basic = IndVarMap[&I];
+                  int new_val = get<1>(t) * get<2>(t_basic);
+                  PHINode* phi_val = PhiMap[indvar.first];
+                  Value* new_incoming = body_builder.CreateAdd(phi_val, 
+                      ConstantInt::getSigned(phi_val->getType(), new_val));
+                  phi_val->addIncoming(new_incoming, b_body);
                 }
               }
             }
@@ -204,12 +209,8 @@ namespace {
         }
 
         // replace all the original uses with phi-node
-        for (auto &B : F) {
-          for (auto &I : B) {
-            if (PhiMap.count(&I)) {
-              I.replaceAllUsesWith(PhiMap[&I]);
-            }
-          }
+        for (auto &phi_val : PhiMap) {
+          (phi_val.first)->replaceAllUsesWith(phi_val.second);
         }
 
       } // finish all loops
