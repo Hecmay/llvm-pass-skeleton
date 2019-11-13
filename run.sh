@@ -5,10 +5,10 @@ export PATH="/work/zhang-x1/common/install/llvm-8.0/build/bin/":$PATH
 export LLVM_DIR=/work/zhang-x1/common/install/llvm-8.0/build/lib/cmake/llvm/
 export EMBENCH_DIR=/work/zhang-x1/users/yz882/cs6120/llvm-pass-skeleton/embench-iot/
 # compile pass to generate shared lib
-#rm -rf build; mkdir build; cd build/; cmake ../; make; cd -
+rm -rf build; mkdir build; cd build/; cmake ../; make; cd -
 # compile to llvm bitcode with clang fromtemd
 clang -c -emit-llvm -O0 -Xclang -disable-O0-optnone $1/*.c $EMBENCH_DIR/support/*.c -I$1 \
--I$EMBENCH_DIR/support -DCPU_MHZ=1024
+-I$EMBENCH_DIR/support -DCPU_MHZ=1
 
 # generate llvm ir from bitcode
 for f in *.bc

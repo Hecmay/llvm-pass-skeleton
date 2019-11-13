@@ -48,6 +48,7 @@ namespace {
       FPM.add(createConstantPropagationPass());
       FPM.add(createIndVarSimplifyPass());
       FPM.add(createDeadCodeEliminationPass());
+      FPM.add(createLoopSimplifyPass());
       FPM.doInitialization();
       bool changed = FPM.run(F);
       FPM.doFinalization();
